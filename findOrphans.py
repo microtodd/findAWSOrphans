@@ -20,6 +20,7 @@ def printHelp():
     -v              verbose mode
     -l              check ELBs
     -s              check SGs
+    -i              check EIPs
     -a              check All
     '''
 
@@ -74,6 +75,31 @@ def checkSGs(stsCreds,stackSGs,verbose=False,region='us-east-1'):
     return unmatchedSGs
 
 ###
+def checkEIPs(stsCreds,stackEIPs,verbose=False,region='us-east-1'):
+
+    # Local
+    unmatchedEIPs = []
+
+    # Get list of EIPs in the environment
+    sgClient = boto3.client('ec2',
+        aws_access_key_id=stsCreds['AccessKeyId'],
+        aws_secret_access_key=stsCreds['SecretAccessKey'],
+        aws_session_token=stsCreds['SessionToken'],
+        region_name=region)
+    runningEIPs = sgClient.describe_addresses()
+
+    # Find unmatched
+    for running in runningEIPs['Addresses']:
+        if verbose:
+            print 'runningEIP => ' + running['PublicIp']
+        if running['PublicIp'] not in stackEIPs:
+            unmatchedEIPs.append(running['PublicIp'])
+    for addr in unmatchedEIPs:
+        print 'unmatchedEIPs => ' + addr
+
+    return unmatchedEIPs
+
+###
 def main(argv):
 
     # Session
@@ -82,6 +108,7 @@ def main(argv):
     Verbose = False
     CheckELBs = False
     CheckSGs = False
+    CheckEIPs = False
 
     # Parse CL opts
     opts, args = getopt.getopt(argv,'hvlsae:p:r:')
@@ -101,9 +128,12 @@ def main(argv):
             CheckELBs = True
         if opt == '-s':
             CheckSGs = True
+        if opt == '-i':
+            CheckEIPs = True
         if opt == '-a':
             CheckELBs = True
             CheckSGs = True
+            CheckEIPs = True
 
     # Validate
     if ARN == None or Profile == None:
@@ -120,7 +150,7 @@ def main(argv):
     stackELBs = {} # AWS::ElasticLoadBalancing::LoadBalancer
     # TODO stackInstances = {}
     stackSGs = {} # AWS::EC2::SecurityGroup
-    # TODO stackEIPs = {} # AWS::EC2::EIP
+    stackEIPs = {} # AWS::EC2::EIP
     # TODO stackENIs = {} # AWS::EC2::NetworkInterface
     stackResourceTypes = {}
     cfClient = boto3.client('cloudformation',
@@ -165,6 +195,12 @@ def main(argv):
                     if Verbose:
                         print 'stacksg => ' + resource['PhysicalResourceId'] + ' => ' + stack['StackName']
                     stackSGs[resource['PhysicalResourceId']] = stack['StackName']
+
+                # Elastic IPs
+                elif resource['ResourceType'] == 'AWS::EC2::EIP' and CheckEIPs:
+                    if Verbose:
+                        print 'stackeip => ' + resource['PhysicalResourceId'] + ' => ' + stack['StackName']
+                    stackEIPs[resource['PhysicalResourceId']] = stack['StackName']
     
     # Do ELBs
     unmatchedELBs = None
@@ -172,9 +208,14 @@ def main(argv):
         unmatchedELBs = checkELBs(stsCreds,stackELBs,verbose=Verbose,region=Region)
     
     # DO SGs
-    UnmatchedSGs = None
+    unmatchedSGs = None
     if CheckSGs:
         unmatchedSGs = checkSGs(stsCreds,stackSGs,verbose=Verbose,region=Region)
+
+    # Do EIPs
+    unmatchedEIPs = None
+    if CheckEIPs:
+        unmatchedEIPs = checkEIPs(stsCreds,stackEIPs,verbose=Verbose,region=Region)
 
 ###
 if __name__ == '__main__':
